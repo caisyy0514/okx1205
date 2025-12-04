@@ -96,6 +96,6 @@ export interface AppConfig {
   okxApiKey: string;
   okxSecretKey: string;
   okxPassphrase: string;
-  geminiApiKey: string;
+  deepseekApiKey: string; // Renamed from geminiApiKey
   isSimulation: boolean;
 }
