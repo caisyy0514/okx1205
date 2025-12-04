@@ -67,7 +67,8 @@ const runTradingLoop = async () => {
             
             if (!marketData || !accountData) return;
 
-            const decision = await aiService.getTradingDecision(config.geminiApiKey, marketData, accountData);
+            // Updated to use deepseekApiKey
+            const decision = await aiService.getTradingDecision(config.deepseekApiKey, marketData, accountData);
             latestDecision = decision;
             
             const conf = decision.trading_decision?.confidence || "0%";
@@ -148,7 +149,7 @@ setInterval(runTradingLoop, 5000);
 app.get('/api/status', (req, res) => {
     res.json({
         isRunning,
-        config: { ...config, okxSecretKey: '***', okxPassphrase: '***', geminiApiKey: '***' }, // Hide sensitive
+        config: { ...config, okxSecretKey: '***', okxPassphrase: '***', deepseekApiKey: '***' }, // Hide sensitive
         marketData,
         accountData,
         latestDecision,
@@ -165,7 +166,7 @@ app.post('/api/config', (req, res) => {
         // Keep old secrets if sending masked version
         okxSecretKey: newConfig.okxSecretKey === '***' ? config.okxSecretKey : newConfig.okxSecretKey,
         okxPassphrase: newConfig.okxPassphrase === '***' ? config.okxPassphrase : newConfig.okxPassphrase,
-        geminiApiKey: newConfig.geminiApiKey === '***' ? config.geminiApiKey : newConfig.geminiApiKey,
+        deepseekApiKey: newConfig.deepseekApiKey === '***' ? config.deepseekApiKey : newConfig.deepseekApiKey,
     };
     addLog('INFO', '配置已通过 Web 更新');
     res.json({ success: true });
