@@ -1,4 +1,3 @@
-
 import { AIDecision, MarketDataCollection, AccountContext } from "../types";
 import { CONTRACT_VAL_ETH, STRATEGY_STAGES, INSTRUMENT_ID } from "../constants";
 
@@ -49,12 +48,22 @@ const calcMACD = (prices: number[]) => {
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 
 const callDeepSeek = async (apiKey: string, messages: any[]) => {
+    // 1. Clean and Validate API Key
+    const cleanKey = apiKey ? apiKey.trim() : "";
+    if (!cleanKey) throw new Error("API Key 为空");
+
+    // Check for non-ASCII characters (e.g., Chinese, Full-width spaces)
+    // eslint-disable-next-line no-control-regex
+    if (/[^\x00-\x7F]/.test(cleanKey)) {
+        throw new Error("API Key 包含非法字符(中文或特殊符号)，请检查是否有复制多余内容");
+    }
+
     try {
         const response = await fetch(DEEPSEEK_API_URL, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey}`
+                "Authorization": `Bearer ${cleanKey}`
             },
             body: JSON.stringify({
                 model: "deepseek-chat", // 使用 deepseek-chat (V3) 模型
@@ -82,8 +91,9 @@ const callDeepSeek = async (apiKey: string, messages: any[]) => {
 export const testConnection = async (apiKey: string): Promise<string> => {
   if (!apiKey) throw new Error("API Key 为空");
   try {
+    // 必须在提示词中包含 "JSON" 字样，否则 deepseek 会报 400 错误
     const content = await callDeepSeek(apiKey, [
-        { role: "user", content: "Say 'OK' only." }
+        { role: "user", content: "Please respond with a JSON object containing the message 'OK'." }
     ]);
     return content || "无响应内容";
   } catch (e: any) {
