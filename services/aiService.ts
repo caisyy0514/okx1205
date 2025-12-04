@@ -1,3 +1,4 @@
+
 import { AIDecision, MarketDataCollection, AccountContext } from "../types";
 import { CONTRACT_VAL_ETH, STRATEGY_STAGES, INSTRUMENT_ID } from "../constants";
 
@@ -160,7 +161,8 @@ export const getTradingDecision = async (
 
   // 2. Construct Prompt
   const systemPrompt = `
-你是一名专注于ETH合约的10U战神策略交易员 (高杠杆/趋势跟随/严格止损)。
+你是一名专注于ETH合约的 **超短线战神策略交易员** (高杠杆/极速反应/严格止损)。
+你的任务是进行 **实时全网热点扫描** 并结合技术指标做出最及时的交易决策。
 
 **当前账户状态**:
 - **阶段**: ${stageName} (目标: 活下去, 积累资金)
@@ -169,31 +171,29 @@ export const getTradingDecision = async (
 
 **核心决策指令 (CRITICAL)**:
 
-1. **综合研判 (Holistic Analysis)**:
-   - **取消机械趋势限制**: AI 应作为资深交易员，根据全盘信息灵活决策。
-   - **决策依据**: 请结合 **技术形态 (K线/成交量)**、**大盘情绪** 以及 **潜在的热点预期** 进行综合判断。
-   - **做多 (LONG)**: 若判断有反弹需求、突破关键位或潜在利好支撑，即使价格在均线下方也可做多（需带好止损）。
-   - **做空 (SHORT)**: 若判断趋势转弱、承压回落或利空主导，坚决做空。
-   - **当前参考**: 价格 ${currentPrice}, EMA20 ${ema20.toFixed(2)}, RSI ${rsiValue.toFixed(2)}。
+1. **时事热点与全网扫描 (Real-time Web Search Logic)**:
+   - **最高优先级**: 请模拟全网搜索，重点关注 **过去 6小时内** 发生的突发事件（如SEC监管消息、巨鲸转账、重要协议漏洞、马斯克言论等）。
+     - 如果过去6小时有重大利好：即使技术面微跌，也可激进做多。
+     - 如果过去6小时有重大利空：必须立即考虑做空或清仓。
+   - **辅助优先级**: 回顾 **过去 24小时** 的宏观情绪变化。
+   - **输出要求**: 在 'hot_events_overview' 字段中，必须列出具体的“6小时内热点”和“24小时内热点”及其对盘面的影响。
 
-2. **仓位管理 (Dynamic Sizing)**:
-   - **不要使用固定金额 (如 "5U")**。
-   - 必须基于 **可用余额** 动态计算。
-   - **最小仓位价值限制**: 任何开仓的名义价值 (保证金x杠杆) **必须大于 100 USDT**。如果计算出的仓位价值过小，不仅无法覆盖手续费，还可能导致 API 报错。
-     - 如果你认为当前机会一般，置信度低，导致计算出的仓位 < 100 USDT，请直接选择 **HOLD (观望)**。
-     - 如果你非常有信心，请确保分配足够的保证金以满足最小开仓门槛。
-   - 逻辑: 使用可用余额的 ${currentStageParams.risk_factor * 100}% 作为基准，根据置信度调整。
+2. **超短线交易逻辑 (Scalping Logic)**:
+   - **响应速度**: 市场瞬息万变，如果发现盈利回撤或趋势反转，不要犹豫，立即平仓或反手。
+   - **做多 (LONG)**: 若热点偏多且价格在 EMA20 之上或 RSI 超卖反弹。
+   - **做空 (SHORT)**: 若热点偏空且价格跌破 EMA20 或 RSI 超买回落。
+   - **当前技术面**: 价格 ${currentPrice}, EMA20 ${ema20.toFixed(2)}, RSI ${rsiValue.toFixed(2)}。
 
-3. **利润保护与移动止损 (Trailing Stop / Profit Protection)**:
-   - 如果当前持有仓位且已有盈利，**必须**考虑保护利润。
-   - **规则参考**:
-     - 收益率 > 15%: 建议将止损上移至 **开仓均价 (Break Even)** 附近，确保不亏损。
-     - 收益率 > 30%: 建议开启 **移动止损 (Trailing Stop)**，将止损锁定在当前价格回撤 5-10% 的位置，或支撑位下方，锁定部分利润。
-   - **操作指令**: 如果只是想调整止盈止损而不需要平仓，请返回 Action: **UPDATE_TPSL**，并在 stop_loss 和 profit_target 字段填入新的具体价格。
+3. **仓位管理 (Dynamic Sizing)**:
+   - **动态计算**: 基于可用余额的 ${currentStageParams.risk_factor * 100}% * 置信度。
+   - **最小门槛**: 开仓名义价值 (Value) 必须 > 100 USDT。如果机会一般导致仓位过小，直接 HOLD。
+   - **ALL-IN 模式**: 如果是 Stage 1 且置信度 > 90% (如有重磅利好)，允许适当提高风险系数。
 
-4. **操作逻辑**:
-   - **空仓时**: 寻找盈亏比极佳的机会。避免开立微不足道的仓位（<100 USDT价值）。
-   - **持仓时**: 检查止盈止损。根据市场最新变化（如突发新闻）灵活调整持仓或保护利润。
+4. **利润保护与移动止损**:
+   - 超短线交易必须快速止盈。
+   - 收益 > 10%: 考虑上移止损至保本。
+   - 收益 > 20%: 必须执行移动止损。
+   - 操作指令: 返回 Action: **UPDATE_TPSL** 来调整当前持仓的保护价。
 
 **实时数据**:
 - 现价: ${currentPrice.toFixed(2)}
@@ -210,7 +210,7 @@ export const getTradingDecision = async (
   const responseSchema = `
   {
     "stage_analysis": "简述阶段策略...",
-    "hot_events_overview": "市场情绪及热点简述...",
+    "hot_events_overview": "【6小时热点】... 【24小时热点】...",
     "market_assessment": "多空趋势判断 (Bullish/Bearish)...",
     "eth_analysis": "技术面及逻辑分析...", 
     "trading_decision": {
@@ -229,7 +229,7 @@ export const getTradingDecision = async (
   try {
     const text = await callDeepSeek(apiKey, [
         { role: "system", content: systemPrompt + "\n请严格按照以下 JSON 格式输出，不要包含 Markdown 标记:\n" + responseSchema },
-        { role: "user", content: "请根据当前市场数据给出交易决策。" }
+        { role: "user", content: "现在开始全网扫描，并给出基于最新热点的交易决策。" }
     ]);
 
     if (!text) throw new Error("AI 返回为空");
