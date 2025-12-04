@@ -1,7 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { AIDecision, MarketDataCollection, PositionData, AccountBalance } from "../types";
-import { CONTRACT_VAL_ETH, STRATEGY_STAGES } from "../constants";
+import { AIDecision, MarketDataCollection, AccountContext } from "../types";
+import { CONTRACT_VAL_ETH, STRATEGY_STAGES, INSTRUMENT_ID } from "../constants";
 
 // --- Technical Indicator Helpers ---
 
@@ -66,7 +66,7 @@ export const testConnection = async (apiKey: string): Promise<string> => {
 export const getTradingDecision = async (
   apiKey: string,
   marketData: MarketDataCollection,
-  accountData: { balance: AccountBalance; position: PositionData | null }
+  accountData: AccountContext
 ): Promise<AIDecision> => {
   if (!apiKey) throw new Error("请输入 Gemini API Key");
 
@@ -77,6 +77,9 @@ export const getTradingDecision = async (
   const totalEquity = parseFloat(accountData.balance.totalEq);
   const availableEquity = parseFloat(accountData.balance.availEq);
   
+  // Find primary position for analysis
+  const primaryPosition = accountData.positions.find(p => p.instId === INSTRUMENT_ID);
+
   // Prepare Candle Arrays (Close prices)
   const closes15m = marketData.candles15m.map(c => parseFloat(c.c));
   
@@ -102,12 +105,12 @@ export const getTradingDecision = async (
   }
 
   // Position Info
-  const hasPosition = accountData.position && parseFloat(accountData.position.pos) > 0;
-  const uplRatio = hasPosition ? parseFloat(accountData.position!.uplRatio) * 100 : 0;
+  const hasPosition = !!primaryPosition && parseFloat(primaryPosition.pos) > 0;
+  const uplRatio = hasPosition ? parseFloat(primaryPosition!.uplRatio) * 100 : 0;
   
   let positionStr = "当前无持仓 (Empty)";
   if (hasPosition) {
-      const p = accountData.position!;
+      const p = primaryPosition!;
       positionStr = `
       持有 ${p.posSide} ${p.pos}张
       开仓均价: ${p.avgPx}
