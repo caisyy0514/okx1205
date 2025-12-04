@@ -1,4 +1,3 @@
-
 import { AIDecision, MarketDataCollection, AccountContext, CandleData } from "../types";
 import { CONTRACT_VAL_ETH, STRATEGY_STAGES, INSTRUMENT_ID } from "../constants";
 
@@ -301,7 +300,12 @@ ${marketDataBlock}
    - 关注 **共振**: MACD 金叉 + 价格站上布林中轨 + RSI < 70 = 强买入信号。
    - 起步期特权: 在 Stage 1，如果技术形态完美（如底部放量大阳线），即使无新闻也允许重仓博取反弹。
 
-3. **交易执行**:
+3. **资金磨损控制与盈亏平衡 (Friction Control)**:
+   - **拒绝无效交易**: 在设定目标利润 (Profit Target) 时，必须考虑交易所的双向手续费（通常市价单约 0.1% - 0.12% 往返总成本）。
+   - **Break-Even 逻辑**: 你的“保本”操作不应仅仅是回到开仓价，而应是 **开仓价 + 手续费成本**。
+   - 仅当预期利润显著高于手续费磨损（例如预期盈利 > 0.5%）时才建议开仓。如果是微小的震荡（<0.3%），请选择 **HOLD** 以避免资金被手续费慢慢磨损。
+
+4. **交易执行**:
    - **Action**: BUY / SELL / HOLD / CLOSE / UPDATE_TPSL
    - **仓位**: 动态计算 (${currentStageParams.risk_factor * 100}% 仓位风险)。
    - **止盈止损**: 必须给出具体数值。Stage 1 允许止损稍微放宽以容忍高波动，但严禁扛单。
