@@ -58,6 +58,7 @@ const runTradingLoop = async () => {
     // Analyze every 15 seconds (High Frequency for Ultra-Short Term)
     if (now - lastAnalysisTime < 15000) return;
 
+    // Use setTimeout instead of setImmediate to avoid TS errors
     setTimeout(async () => {
         try {
             lastAnalysisTime = now;
@@ -65,6 +66,7 @@ const runTradingLoop = async () => {
             
             if (!marketData || !accountData) return;
 
+            // Updated to use deepseekApiKey
             const decision = await aiService.getTradingDecision(config.deepseekApiKey, marketData, accountData);
             latestDecision = decision;
             
@@ -76,18 +78,15 @@ const runTradingLoop = async () => {
 
             // Execute Actions
             if (decision.action === 'UPDATE_TPSL') {
+                 // Capture local reference for type narrowing
                  if (primaryPosition) {
                     const newSL = decision.trading_decision.stop_loss;
                     const newTP = decision.trading_decision.profit_target;
                     
-                    // Robust check: handles string "3000", number 3000, but fails on "0", "", undefined
-                    const isValid = (p: string | number | undefined) => {
-                        if (p === undefined || p === null || p === '') return false;
-                        const val = parseFloat(p.toString());
-                        return !isNaN(val) && val > 0;
-                    };
+                    const isValid = (p: string) => p && !isNaN(parseFloat(p)) && parseFloat(p) > 0;
                     
                     if (isValid(newSL) || isValid(newTP)) {
+                        // Ensure strict type check against 'net' to allow TS to narrow posSide to 'long' | 'short'
                         if (primaryPosition.posSide === 'net') {
                              addLog('WARNING', '单向持仓模式不支持自动更新止损/止盈');
                         } else {
@@ -96,11 +95,11 @@ const runTradingLoop = async () => {
                                     INSTRUMENT_ID, 
                                     primaryPosition.posSide, 
                                     primaryPosition.pos, 
-                                    isValid(newSL) ? newSL.toString() : undefined,
-                                    isValid(newTP) ? newTP.toString() : undefined,
+                                    isValid(newSL) ? newSL : undefined,
+                                    isValid(newTP) ? newTP : undefined,
                                     config
                                 );
-                                addLog('SUCCESS', `云端止损更新: ${res.msg}`);
+                                addLog('SUCCESS', `🛡️ 利润保护触发: ${res.msg} (SL: ${newSL || '不变'}, TP: ${newTP || '不变'})`);
                             } catch(err: any) {
                                 addLog('ERROR', `更新止损失败: ${err.message}`);
                             }
@@ -142,6 +141,7 @@ const runTradingLoop = async () => {
 };
 
 // Start Loop
+// Check loop condition every 5 seconds (must be smaller than analysis interval)
 setInterval(runTradingLoop, 5000);
 
 // --- API Endpoints ---
@@ -149,7 +149,7 @@ setInterval(runTradingLoop, 5000);
 app.get('/api/status', (req, res) => {
     res.json({
         isRunning,
-        config: { ...config, okxSecretKey: '***', okxPassphrase: '***', deepseekApiKey: '***' }, 
+        config: { ...config, okxSecretKey: '***', okxPassphrase: '***', deepseekApiKey: '***' }, // Hide sensitive
         marketData,
         accountData,
         latestDecision,
@@ -159,9 +159,11 @@ app.get('/api/status', (req, res) => {
 
 app.post('/api/config', (req, res) => {
     const newConfig = req.body;
+    // Merge logic
     config = {
         ...config,
         ...newConfig,
+        // Keep old secrets if sending masked version
         okxSecretKey: newConfig.okxSecretKey === '***' ? config.okxSecretKey : newConfig.okxSecretKey,
         okxPassphrase: newConfig.okxPassphrase === '***' ? config.okxPassphrase : newConfig.okxPassphrase,
         deepseekApiKey: newConfig.deepseekApiKey === '***' ? config.deepseekApiKey : newConfig.deepseekApiKey,
@@ -177,6 +179,7 @@ app.post('/api/toggle', (req, res) => {
     res.json({ success: true, isRunning });
 });
 
+// Serve React App
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
