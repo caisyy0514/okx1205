@@ -1,5 +1,4 @@
 
-import { GoogleGenAI } from "@google/genai";
 import { AIDecision, MarketDataCollection, AccountContext } from "../types";
 import { CONTRACT_VAL_ETH, STRATEGY_STAGES, INSTRUMENT_ID } from "../constants";
 
@@ -46,16 +45,47 @@ const calcMACD = (prices: number[]) => {
   return { macd: macdLine, signal: signalLine, hist: macdLine - signalLine };
 };
 
+// --- DeepSeek API Helper ---
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+
+const callDeepSeek = async (apiKey: string, messages: any[]) => {
+    try {
+        const response = await fetch(DEEPSEEK_API_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "deepseek-chat", // 使用 deepseek-chat (V3) 模型
+                messages: messages,
+                stream: false,
+                temperature: 1.0, // 增加一定的创造性，防止死板
+                max_tokens: 4096,
+                response_format: { type: 'json_object' } // 强制 JSON 输出
+            })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`DeepSeek API Error: ${response.status} - ${errText}`);
+        }
+
+        const json = await response.json();
+        return json.choices[0].message.content;
+    } catch (e: any) {
+        throw new Error(e.message || "DeepSeek 请求失败");
+    }
+};
+
 // --- Test Connection Function ---
 export const testConnection = async (apiKey: string): Promise<string> => {
   if (!apiKey) throw new Error("API Key 为空");
-  const ai = new GoogleGenAI({ apiKey });
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: "Hello, reply with 'OK' only.",
-    });
-    return response.text || "无响应内容";
+    const content = await callDeepSeek(apiKey, [
+        { role: "user", content: "Say 'OK' only." }
+    ]);
+    return content || "无响应内容";
   } catch (e: any) {
     throw new Error(e.message || "连接失败");
   }
@@ -68,9 +98,7 @@ export const getTradingDecision = async (
   marketData: MarketDataCollection,
   accountData: AccountContext
 ): Promise<AIDecision> => {
-  if (!apiKey) throw new Error("请输入 Gemini API Key");
-
-  const ai = new GoogleGenAI({ apiKey });
+  if (!apiKey) throw new Error("请输入 DeepSeek API Key");
 
   // 1. Data Prep
   const currentPrice = parseFloat(marketData.ticker?.last || "0");
@@ -166,7 +194,7 @@ export const getTradingDecision = async (
 - EMA20: ${ema20.toFixed(2)}
 - MACD: ${macd.macd.toFixed(4)}
 
-请生成 JSON 格式的交易决策。
+请生成纯净的 JSON 格式交易决策。
 `;
 
   const responseSchema = `
@@ -189,24 +217,21 @@ export const getTradingDecision = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: systemPrompt + "\n请严格按照以下 JSON 格式输出:\n" + responseSchema,
-      config: {
-        responseMimeType: 'application/json'
-      }
-    });
+    const text = await callDeepSeek(apiKey, [
+        { role: "system", content: systemPrompt + "\n请严格按照以下 JSON 格式输出，不要包含 Markdown 标记:\n" + responseSchema },
+        { role: "user", content: "请根据当前市场数据给出交易决策。" }
+    ]);
 
-    const text = response.text;
     if (!text) throw new Error("AI 返回为空");
 
-    // Parse JSON
+    // Parse JSON (Handle potential markdown wrappers from generic LLMs)
     let decision: AIDecision;
     try {
-        decision = JSON.parse(text);
-    } catch (e) {
         const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
         decision = JSON.parse(cleanText);
+    } catch (e) {
+        console.error("JSON Parse Failed:", text);
+        throw new Error("AI 返回格式错误 (无法解析 JSON)");
     }
 
     // --- Post-Processing & Validation ---
