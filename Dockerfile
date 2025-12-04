@@ -7,11 +7,10 @@ FROM node:20-alpine
 WORKDIR /app
 
 # 1. 复制依赖定义文件
-# 使用通配符确保同时复制 package.json 和 package-lock.json (如果存在)
-COPY package*.json ./
+# 只复制 package.json，忽略 lock 文件以强制重新解析版本，解决依赖版本不存在的问题
+COPY package.json ./
 
 # 2. 安装所有依赖
-# 注意：这里不使用 --production，因为我们需要 devDependencies (如 vite) 来编译前端
 # --legacy-peer-deps 用于解决潜在的依赖冲突
 RUN npm install --legacy-peer-deps
 
