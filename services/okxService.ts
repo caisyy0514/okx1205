@@ -9,7 +9,6 @@ const randomVariation = (base: number, percent: number) => {
 const BASE_URL = "https://www.okx.com";
 
 // Helper: Format Price to 2 decimal places (ETH standard tick size)
-// Fixes 'Parameter tpTriggerPx error' caused by excess precision
 const formatPx = (price: string | number | undefined | null): string | undefined => {
     if (price === undefined || price === null || price === '') return undefined;
     const p = parseFloat(price.toString());
@@ -129,6 +128,7 @@ export const fetchAccountData = async (config: any): Promise<AccountContext> => 
                 cTime: rawPos.cTime
             };
             
+             // Find SL/TP orders specific to this position side
              if (algoOrders.length > 0) {
                  const slOrder = algoOrders.find((o: any) => o.instId === rawPos.instId && o.posSide === rawPos.posSide && o.slTriggerPx && parseFloat(o.slTriggerPx) > 0);
                  const tpOrder = algoOrders.find((o: any) => o.instId === rawPos.instId && o.posSide === rawPos.posSide && o.tpTriggerPx && parseFloat(o.tpTriggerPx) > 0);
@@ -184,7 +184,6 @@ const ensureLongShortMode = async (config: any) => {
     
     if (json.code === '0' && json.data && json.data[0]) {
         if (json.data[0].posMode !== 'long_short_mode') {
-            console.log("Current posMode:", json.data[0].posMode, "Switching to long_short_mode...");
             const setPath = "/api/v5/account/set-position-mode";
             const setBody = JSON.stringify({ posMode: 'long_short_mode' });
             const setHeaders = getHeaders('POST', setPath, setBody, config);
@@ -212,16 +211,29 @@ export const executeOrder = async (order: AIDecision, config: any): Promise<any>
 
     if (order.action === 'CLOSE') {
         const closePath = "/api/v5/trade/close-position";
-        const closeLongBody = JSON.stringify({ instId: INSTRUMENT_ID, posSide: 'long', mgnMode: 'isolated' });
+        
+        // Try Closing LONG
+        const closeLongBody = JSON.stringify({
+            instId: INSTRUMENT_ID,
+            posSide: 'long', 
+            mgnMode: 'isolated'
+        });
         const headersLong = getHeaders('POST', closePath, closeLongBody, config);
         const resLong = await fetch(BASE_URL + closePath, { method: 'POST', headers: headersLong, body: closeLongBody });
         const jsonLong = await resLong.json();
+        
         if (jsonLong.code === '0') return jsonLong; 
         
-        const closeShortBody = JSON.stringify({ instId: INSTRUMENT_ID, posSide: 'short', mgnMode: 'isolated' });
+        // Try Closing SHORT
+        const closeShortBody = JSON.stringify({ 
+            instId: INSTRUMENT_ID, 
+            posSide: 'short', 
+            mgnMode: 'isolated' 
+        });
         const headersShort = getHeaders('POST', closePath, closeShortBody, config);
         const resShort = await fetch(BASE_URL + closePath, { method: 'POST', headers: headersShort, body: closeShortBody });
         const jsonShort = await resShort.json();
+
         if (jsonShort.code === '0') return jsonShort;
 
         const longMsg = jsonLong.code === '51000' || jsonLong.msg.includes('不存在') ? '多单不存在' : jsonLong.msg;
@@ -258,8 +270,6 @@ export const executeOrder = async (order: AIDecision, config: any): Promise<any>
         sz: sizeStr
     };
     
-    // Validate and Format TP/SL
-    // Use formatPx to ensure "3000.12345" becomes "3000.12" to avoid 51000 error
     const validTp = formatPx(order.trading_decision?.profit_target);
     const validSl = formatPx(order.trading_decision?.stop_loss);
 
@@ -303,44 +313,27 @@ export const updatePositionTPSL = async (instId: string, posSide: 'long' | 'shor
         return { code: "0", msg: "模拟更新成功" };
     }
 
+    // 安全更新策略：
+    // 1. 获取当前待单
+    // 2. 尝试提交新的 TP/SL 单 (先加)
+    // 3. 如果成功，再撤销旧的 TP/SL 单 (后删)
+    // 这样避免了"先删后加"中间出现错误导致仓位无保护的情况。
+
     try {
-        const pendingAlgos = await fetchAlgoOrders(config);
-        
-        const ordersToCancel: any[] = [];
-        
-        // Strict format logic
         const finalSl = formatPx(slPrice);
         const finalTp = formatPx(tpPrice);
 
-        const isSL = (o: any) => o.slTriggerPx && parseFloat(o.slTriggerPx) > 0;
-        const isTP = (o: any) => o.tpTriggerPx && parseFloat(o.tpTriggerPx) > 0;
+        if (!finalSl && !finalTp) return { code: "0", msg: "无新的止盈止损价格，跳过更新" };
 
-        // Cancel old orders only if we are replacing them
-        if (finalSl) {
-            const sls = pendingAlgos.filter((o: any) => o.instId === instId && o.posSide === posSide && isSL(o));
-            ordersToCancel.push(...sls.map(o => ({ algoId: o.algoId, instId })));
-        }
-
-        if (finalTp) {
-            const tps = pendingAlgos.filter((o: any) => o.instId === instId && o.posSide === posSide && isTP(o));
-            ordersToCancel.push(...tps.map(o => ({ algoId: o.algoId, instId })));
-        }
-
-        if (ordersToCancel.length > 0) {
-            const cancelPath = "/api/v5/trade/cancel-algos";
-            const uniqueCancel = Array.from(new Set(ordersToCancel.map(a => a.algoId)))
-                .map(id => ordersToCancel.find(a => a.algoId === id));
-                
-            const cancelBody = JSON.stringify(uniqueCancel);
-            const headers = getHeaders('POST', cancelPath, cancelBody, config);
-            await fetch(BASE_URL + cancelPath, { method: 'POST', headers: headers, body: cancelBody });
-            console.log(`[TPSL] Cancelled ${uniqueCancel.length} old algo orders.`);
-        }
-
-        if (!finalSl && !finalTp) return { code: "0", msg: "无新的止盈止损价格，保留原样" };
-
-        const path = "/api/v5/trade/order-algo";
+        const pendingAlgos = await fetchAlgoOrders(config);
         
+        // ----------------------------------------
+        // Step 1: Place NEW Algo Orders First
+        // ----------------------------------------
+        const path = "/api/v5/trade/order-algo";
+        let slSuccess = false;
+        let tpSuccess = false;
+
         if (finalSl) {
             const slBody = JSON.stringify({
                 instId,
@@ -356,7 +349,13 @@ export const updatePositionTPSL = async (instId: string, posSide: 'long' | 'shor
             const slHeaders = getHeaders('POST', path, slBody, config);
             const slRes = await fetch(BASE_URL + path, { method: 'POST', headers: slHeaders, body: slBody });
             const slJson = await slRes.json();
-            if (slJson.code !== '0') throw new Error(`设置止损失败: ${slJson.msg}`);
+            
+            if (slJson.code === '0') {
+                slSuccess = true;
+                console.log(`[TPSL] New SL placed at ${finalSl}`);
+            } else {
+                throw new Error(`设置新止损失败 (取消操作): ${slJson.msg}`);
+            }
         }
 
         if (finalTp) {
@@ -374,10 +373,50 @@ export const updatePositionTPSL = async (instId: string, posSide: 'long' | 'shor
             const tpHeaders = getHeaders('POST', path, tpBody, config);
             const tpRes = await fetch(BASE_URL + path, { method: 'POST', headers: tpHeaders, body: tpBody });
             const tpJson = await tpRes.json();
-            if (tpJson.code !== '0') throw new Error(`设置止盈失败: ${tpJson.msg}`);
+
+            if (tpJson.code === '0') {
+                tpSuccess = true;
+                console.log(`[TPSL] New TP placed at ${finalTp}`);
+            } else {
+                // 注意：如果 SL 成功但 TP 失败，SL 已经挂上去了，这是可以接受的（至少有保护），但为了严谨这里抛出错误。
+                // 实际操作中，最好分步提示。
+                throw new Error(`设置新止盈失败: ${tpJson.msg}`);
+            }
         }
 
-        return { code: "0", msg: "止盈止损更新成功" };
+        // ----------------------------------------
+        // Step 2: Cancel OLD Algo Orders Only After Success
+        // ----------------------------------------
+        const ordersToCancel: any[] = [];
+        
+        const isSL = (o: any) => o.slTriggerPx && parseFloat(o.slTriggerPx) > 0;
+        const isTP = (o: any) => o.tpTriggerPx && parseFloat(o.tpTriggerPx) > 0;
+
+        // If we successfully placed a new SL, cancel ALL old SLs for this position
+        if (slSuccess || (finalSl && slSuccess)) { // Redundant check for clarity
+            const oldSls = pendingAlgos.filter((o: any) => o.instId === instId && o.posSide === posSide && isSL(o));
+            ordersToCancel.push(...oldSls.map(o => ({ algoId: o.algoId, instId })));
+        }
+
+        // If we successfully placed a new TP, cancel ALL old TPs for this position
+        if (tpSuccess || (finalTp && tpSuccess)) {
+            const oldTps = pendingAlgos.filter((o: any) => o.instId === instId && o.posSide === posSide && isTP(o));
+            ordersToCancel.push(...oldTps.map(o => ({ algoId: o.algoId, instId })));
+        }
+
+        if (ordersToCancel.length > 0) {
+            const cancelPath = "/api/v5/trade/cancel-algos";
+            // Deduplicate ids just in case
+            const uniqueCancel = Array.from(new Set(ordersToCancel.map(a => a.algoId)))
+                .map(id => ordersToCancel.find(a => a.algoId === id));
+                
+            const cancelBody = JSON.stringify(uniqueCancel);
+            const headers = getHeaders('POST', cancelPath, cancelBody, config);
+            await fetch(BASE_URL + cancelPath, { method: 'POST', headers: headers, body: cancelBody });
+            console.log(`[TPSL] Cleaned up ${uniqueCancel.length} old algo orders.`);
+        }
+
+        return { code: "0", msg: "止盈止损安全更新成功" };
 
     } catch (e: any) {
         console.error("Update TPSL Failed:", e);
