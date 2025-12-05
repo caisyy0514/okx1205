@@ -55,14 +55,14 @@ const runTradingLoop = async () => {
 
     // 2. AI Analysis Logic
     const now = Date.now();
-    // Analyze every 15 seconds (High Frequency for Ultra-Short Term)
-    if (now - lastAnalysisTime < 15000) return;
+    // Analyze every 60 seconds (1 minute)
+    if (now - lastAnalysisTime < 60000) return;
 
     // Use setTimeout instead of setImmediate to avoid TS errors
     setTimeout(async () => {
         try {
             lastAnalysisTime = now;
-            addLog('INFO', '正在调用云端战神引擎 (超短线模式)...');
+            addLog('INFO', '正在调用云端战神引擎...');
             
             if (!marketData || !accountData) return;
 
@@ -99,7 +99,7 @@ const runTradingLoop = async () => {
                                     isValid(newTP) ? newTP : undefined,
                                     config
                                 );
-                                addLog('SUCCESS', `🛡️ 利润保护触发: ${res.msg} (SL: ${newSL || '不变'}, TP: ${newTP || '不变'})`);
+                                addLog('SUCCESS', `云端止损更新: ${res.msg}`);
                             } catch(err: any) {
                                 addLog('ERROR', `更新止损失败: ${err.message}`);
                             }
