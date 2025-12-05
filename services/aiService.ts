@@ -390,7 +390,7 @@ export const getTradingDecision = async (
 
   const systemPrompt = `
 你是一名专注于ETH合约的 **超短线战神策略交易员**。
-你拥有全面的市场数据，并具备 **实时联网搜索能力 (Real-Time Web Search)**。
+你拥有最全面的市场数据，并具备 **实时联网搜索能力 (Real-Time Web Search)**。
 
 **一、全面行情分析数据**:
 ${marketDataBlock}
