@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Settings, Play, Pause, RefreshCw, Activity, Zap, TrendingUp, AlertCircle, Terminal, Shield, Target, Brain, X, Eye, Flame, Cloud } from 'lucide-react';
 import { MarketDataCollection, AccountContext, AIDecision, SystemLog, AppConfig } from './types';
@@ -18,8 +17,6 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [latestDecision, setLatestDecision] = useState<AIDecision | null>(null);
 
-  // Removed logsEndRef and auto-scroll effect based on user request
-
   // Poll Server Status
   const fetchStatus = useCallback(async () => {
     try {
@@ -27,8 +24,6 @@ const App: React.FC = () => {
         
         // Handle non-200 responses or HTML/text responses
         if (!res.ok) {
-           // If backend is down or 404, we might get here.
-           // Don't log error to console every second if it's just polling.
            return; 
         }
 
@@ -40,16 +35,11 @@ const App: React.FC = () => {
             setAccountData(data.accountData);
             setLatestDecision(data.latestDecision);
             setLogs(data.logs); // Sync logs from server
-
-            // Sync local config display if needed, but be careful not to overwrite local editing
-            // Here we just rely on local config state for the modal, push to server on save
         } catch (parseError) {
-             // This happens if the server returns HTML (e.g. 404 page) or empty string
-             // console.warn("Invalid JSON response:", text.substring(0, 50));
+             // Ignore parse errors
         }
     } catch (e) {
-        // Network error (fetch failed)
-        // console.error("Connection lost:", e);
+        // Ignore network errors
     }
   }, []);
 
@@ -286,13 +276,13 @@ const App: React.FC = () => {
               )}
            </div>
 
-           {/* Logs */}
+           {/* Logs - Reversed Order (Newest First) */}
            <div className="flex-1 bg-black/40 border border-okx-border rounded-xl p-4 overflow-hidden flex flex-col">
              <div className="flex items-center gap-2 mb-2 text-okx-subtext text-xs uppercase tracking-wider font-semibold">
                 <Terminal size={12} /> 云端战地日志
              </div>
              <div className="flex-1 overflow-y-auto space-y-2 pr-2 font-mono text-xs">
-                 {logs.map(log => (
+                 {[...logs].reverse().map(log => (
                     <div key={log.id} className="break-words border-b border-gray-800/50 pb-1 mb-1 last:border-0">
                         <span className="text-gray-500">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
                         <span className={
