@@ -67,6 +67,8 @@ const calcMACD = (prices: number[]) => {
   
   if (prices.length < longPeriod) return { macd: 0, signal: 0, hist: 0 };
   
+  // Calculate EMA12 and EMA26 arrays to get MACD line array
+  // Simplified: Just calculating the *latest* values for prompt
   const ema12 = calcEMA(prices.slice(-shortPeriod * 2), shortPeriod); 
   const ema26 = calcEMA(prices.slice(-longPeriod * 2), longPeriod);
   
@@ -279,9 +281,9 @@ export const getTradingDecision = async (
 
       const buffer = currentPrice * 0.002;
 
-      // 3. 利润/亏损阶段判断 (Risk & Profit Stages)
+      // 3. 利润/亏损阶段判断
       if (netPnL <= 0) {
-          // --- 亏损风控逻辑 (Loss Risk Control) ---
+          // --- 亏损风控逻辑 ---
           const isTrendAligned = isLong 
               ? (currentPrice > ema20 && macdData.hist > -5) 
               : (currentPrice < ema20 && macdData.hist < 5);
@@ -313,8 +315,7 @@ export const getTradingDecision = async (
                   : Math.min(parseFloat(p.slTriggerPx || "999999"), currentPrice * 1.01); 
           }
       } else {
-          // --- 盈利管理逻辑 (Profit Management) ---
-          // Pyramiding Logic (盈利加仓)
+          // --- 盈利管理逻辑 ---
           const isStrongTrend = isLong
               ? (currentPrice > boll.upper || (macdData.hist > 0 && rsi14 > 55))
               : (currentPrice < boll.lower || (macdData.hist < 0 && rsi14 < 45));
@@ -323,7 +324,7 @@ export const getTradingDecision = async (
           const maxPosRatio = (currentStageParams as any).max_pos_ratio || 2.0;
           const hasSpace = currentPosRatio < maxPosRatio;
 
-          // 如果趋势强劲且有空间，且盈利超过 10%，建议顺势加仓
+          // 盈利加仓 (Pyramiding)
           if (isStrongTrend && hasSpace && netROI > 10) {
                opSuggestion = isLong 
                   ? `建议 BUY (追涨加仓) ${posSize * 0.3} 张`
@@ -352,7 +353,6 @@ export const getTradingDecision = async (
       }
 
       // 4. 棘轮效应 (Hard Enforcement) - 严格修正 recommendedSL
-      // 确保推荐止损永远优于当前止损
       const currentSL = p.slTriggerPx ? parseFloat(p.slTriggerPx) : 0;
       if (recommendedSL > 0) {
           if (isLong) {
@@ -430,7 +430,8 @@ ${marketDataBlock}
 
 1. **首次开仓风控 (Initial Entry Rules)**:
    - **最小市值门槛**: 首次开仓的 **实际持仓市值 (Notional Value)** 必须 >= 50 USDT。
-     - 注意：Notional Value = 保证金 × 杠杆。不是指保证金要 50U。
+     - **重要**: "市值" = 保证金 x 杠杆。例如 100x 杠杆下，**仅需 0.5 USDT 保证金** 即可达到 50 USDT 市值。
+     - **不要误判**: 如果余额 > 0.6U，资金绝对充足！请勿因为"余额不足 50U"而放弃开仓。只要余额够付 0.5U 保证金，就大胆开！
    - **最大止损**: 首次开仓止损造成的亏损，**绝不允许超过保证金 20%**。确保 "(Abs(Entry - SL) / Entry) * Leverage < 0.2"。
 
 2. **补仓与加仓机制 (Dynamic Sizing)**:
@@ -507,21 +508,20 @@ ${marketDataBlock}
 
     // --- 强制修正：首仓市值检查 (Min Notional Value) ---
     // 逻辑：如果当前无持仓，且计算出的开仓市值 < 50U，强制提升
-    if (!hasPosition && decision.action !== 'HOLD' && decision.action !== 'CLOSE' && decision.action !== 'UPDATE_TPSL') {
-        const MIN_OPEN_VALUE = 50;
-        if (positionValue < MIN_OPEN_VALUE) {
-            // Check if user has enough balance to cover 50U notional
-            // Required Margin = 50 / Leverage
-            const reqMargin = MIN_OPEN_VALUE / safeLeverage;
-            if (availableEquity > reqMargin * 1.05) { // +5% buffer
-                positionValue = MIN_OPEN_VALUE;
-                console.log(`[AI] 首次开仓强制修正: 市值提升至 ${MIN_OPEN_VALUE} USDT (原: ${(finalMargin * safeLeverage).toFixed(2)})`);
-            } else {
-                console.warn(`[AI] 首次开仓资金不足 (${availableEquity.toFixed(2)} < ${reqMargin.toFixed(2)})，无法满足50U市值，转为HOLD`);
-                decision.action = 'HOLD';
-                decision.size = "0";
-                decision.reasoning += ` [系统修正: 资金不足以开启50U市值的最小底仓]`;
-            }
+    const isInitialOpen = !hasPosition;
+    const MIN_OPEN_VALUE = isInitialOpen ? 50 : 0;
+
+    if (isInitialOpen && positionValue < MIN_OPEN_VALUE) {
+        const reqMargin = MIN_OPEN_VALUE / safeLeverage;
+        // 如果账户余额足够支付 50U 市值对应的保证金 (带5%缓冲)
+        if (availableEquity > reqMargin * 1.05) {
+            positionValue = MIN_OPEN_VALUE;
+            console.log(`[AI] 首次开仓强制修正: 市值提升至 ${MIN_OPEN_VALUE} USDT (原计算: ${(finalMargin * safeLeverage).toFixed(2)})`);
+        } else {
+            console.warn(`[AI] 首次开仓资金不足 (${availableEquity.toFixed(2)} < ${reqMargin.toFixed(2)})，无法满足50U市值，转为HOLD`);
+            decision.action = 'HOLD';
+            decision.size = "0";
+            decision.reasoning += ` [系统修正: 资金不足以开启50U市值的最小底仓]`;
         }
     }
 
